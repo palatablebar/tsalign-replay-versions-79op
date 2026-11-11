@@ -65,6 +65,7 @@ CREATE TABLE alignment_job (
     fill_strategy VARCHAR(24) NOT NULL,
     status VARCHAR(16) DEFAULT 'pending',
     error_reason VARCHAR(40) DEFAULT '',
+    current_run_id INTEGER,
     params_snapshot JSON DEFAULT '{}',
     note TEXT DEFAULT '',
     created_by INTEGER REFERENCES users(id),
@@ -74,10 +75,13 @@ CREATE TABLE alignment_job (
 
 CREATE TABLE alignment_run (
     id SERIAL PRIMARY KEY,
-    job_id INTEGER UNIQUE NOT NULL REFERENCES alignment_job(id),
+    job_id INTEGER NOT NULL REFERENCES alignment_job(id),
+    version_no INTEGER NOT NULL,
+    request_key VARCHAR(64) UNIQUE NOT NULL,
     status VARCHAR(16) DEFAULT 'running',
     started_at TIMESTAMP DEFAULT now(),
     finished_at TIMESTAMP,
+    published_at TIMESTAMP,
     duration_ms INTEGER DEFAULT 0,
     coverage_pct DOUBLE PRECISION DEFAULT 0,
     drift_ms DOUBLE PRECISION DEFAULT 0,
@@ -89,8 +93,13 @@ CREATE TABLE alignment_run (
     point_count INTEGER DEFAULT 0,
     bucket_count INTEGER DEFAULT 0,
     failure_reason VARCHAR(40) DEFAULT '',
-    result_json JSON DEFAULT '{}'
+    input_watermark JSON DEFAULT '[]',
+    result_json JSON DEFAULT '{}',
+    CONSTRAINT uq_alignment_run_job_version UNIQUE (job_id, version_no)
 );
+
+ALTER TABLE alignment_job
+    ADD CONSTRAINT fk_alignment_job_current_run FOREIGN KEY (current_run_id) REFERENCES alignment_run(id);
 
 CREATE TABLE gap_event (
     id SERIAL PRIMARY KEY,

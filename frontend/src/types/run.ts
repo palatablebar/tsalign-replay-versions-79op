@@ -41,9 +41,12 @@ export interface RunSummary {
   id: number
   job_id: number
   job_name: string
+  version_no: number
+  is_current: boolean
   status: 'running' | 'completed' | 'failed'
   started_at: string | null
   finished_at: string | null
+  published_at: string | null
   duration_ms: number
   coverage_pct: number
   drift_ms: number
@@ -56,6 +59,15 @@ export interface RunSummary {
   bucket_count: number
   failure_reason: string
   created_by_name?: string | null
+}
+
+export interface WatermarkEntry {
+  signal_code: string
+  point_count: number
+  first_ts: number | null
+  last_ts: number | null
+  max_seq: number
+  content_sha1: string
 }
 
 export interface QualityComponents {
@@ -76,6 +88,7 @@ export interface RunDetail extends RunSummary {
   window_end: string
   agg_strategy: string
   fill_strategy: string
+  input_watermark: WatermarkEntry[]
   drift: DriftItem[]
   series: SeriesItem[]
   gaps: RunGap[]

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.config.celery_app import celery_app
-from src.constants.enums import AggStrategy, FillStrategy, GridSize, JobStatus
+from src.constants.enums import AggStrategy, FillStrategy, GridSize, JobStatus, RunStatus
 from src.constants.error_codes import AppError, ErrorCode
 from src.models import AlignmentJob, AlignmentRun, User
 from src.services import signal_service
@@ -107,7 +107,30 @@ def rerun(db: Session, job_id: int) -> AlignmentJob:
 
 
 def run_of(db: Session, job_id: int) -> AlignmentRun | None:
-    return db.scalar(select(AlignmentRun).where(AlignmentRun.job_id == job_id))
+    """任务的当前在线结果 = 最近一次成功发布的版本（失败/运行中版本不占用该指针）。"""
+    job = db.get(AlignmentJob, job_id)
+    if job is None:
+        return None
+    if job.current_run_id:
+        run = db.get(AlignmentRun, job.current_run_id)
+        if run is not None:
+            return run
+    # 兼容：指针缺失时回退到最近一个成功发布的版本
+    return db.scalar(
+        select(AlignmentRun)
+        .where(AlignmentRun.job_id == job_id, AlignmentRun.status == RunStatus.COMPLETED.value)
+        .order_by(AlignmentRun.version_no.desc())
+        .limit(1)
+    )
+
+
+def list_versions(db: Session, job_id: int) -> list[AlignmentRun]:
+    """任务的全部结果版本（含失败版本），新→旧。"""
+    return list(
+        db.scalars(
+            select(AlignmentRun).where(AlignmentRun.job_id == job_id).order_by(AlignmentRun.version_no.desc())
+        )
+    )
 
 
 def to_dict(db: Session, job: AlignmentJob) -> dict:

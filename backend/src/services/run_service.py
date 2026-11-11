@@ -1,4 +1,8 @@
-"""Run queries, aligned-series projections and CSV export."""
+"""Run queries, aligned-series projections and CSV export.
+
+读取路径只使用各版本自己的冻结快照（result_json / gap_event 行），
+绝不回查 raw_telemetry —— 追溯旧版本时不会把后来到达的源数据带回去。
+"""
 from __future__ import annotations
 
 import csv
@@ -8,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.constants.error_codes import AppError, ErrorCode
-from src.models import AlignmentRun, GapEvent, User
+from src.models import AlignmentJob, AlignmentRun, GapEvent, User
 from src.utils.timeutil import from_epoch, iso
 
 EXPORT_HEADER = [
@@ -24,8 +28,14 @@ EXPORT_HEADER = [
 ]
 
 
-def list_runs(db: Session) -> list[AlignmentRun]:
-    return list(db.scalars(select(AlignmentRun).order_by(AlignmentRun.id.desc())))
+def list_runs(db: Session, job_id: int | None = None, current_only: bool = False) -> list[AlignmentRun]:
+    statement = select(AlignmentRun)
+    if job_id is not None:
+        statement = statement.where(AlignmentRun.job_id == job_id)
+    if current_only:
+        # 只返回各任务当前发布（在线）的版本
+        statement = statement.join(AlignmentJob, AlignmentJob.current_run_id == AlignmentRun.id)
+    return list(db.scalars(statement.order_by(AlignmentRun.id.desc())))
 
 
 def get_run(db: Session, run_id: int) -> AlignmentRun:
@@ -49,9 +59,12 @@ def to_dict(db: Session, run: AlignmentRun) -> dict:
         "id": run.id,
         "job_id": run.job_id,
         "job_name": job.name if job else "",
+        "version_no": run.version_no,
+        "is_current": bool(job and job.current_run_id == run.id),
         "status": run.status,
         "started_at": iso(run.started_at),
         "finished_at": iso(run.finished_at),
+        "published_at": iso(run.published_at),
         "duration_ms": run.duration_ms,
         "coverage_pct": run.coverage_pct,
         "drift_ms": run.drift_ms,
@@ -103,6 +116,7 @@ def to_detail(db: Session, run: AlignmentRun) -> dict:
             "window_end": iso(job.window_end) if job else "",
             "agg_strategy": job.agg_strategy if job else "",
             "fill_strategy": job.fill_strategy if job else "",
+            "input_watermark": run.input_watermark or [],
             "drift": result.get("drift") or [],
             "series": result.get("series") or [],
             "gaps": gap_payload,

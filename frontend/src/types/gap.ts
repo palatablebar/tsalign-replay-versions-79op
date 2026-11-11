@@ -2,6 +2,8 @@ export interface GapEvent {
   id: number
   run_id: number
   run_name: string
+  version_no: number | null
+  run_status: string
   signal_code: string
   device_code: string
   device_name: string

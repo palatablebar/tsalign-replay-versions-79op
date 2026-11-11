@@ -8,8 +8,9 @@ from src.middlewares.audit_logger import record
 from src.services import run_service
 
 
-def list_runs(db: Session) -> dict:
-    return {"items": [run_service.to_dict(db, run) for run in run_service.list_runs(db)]}
+def list_runs(db: Session, job_id: int | None = None, current_only: bool = False) -> dict:
+    runs = run_service.list_runs(db, job_id=job_id, current_only=current_only)
+    return {"items": [run_service.to_dict(db, run) for run in runs]}
 
 
 def run_detail(db: Session, run_id: int) -> dict:

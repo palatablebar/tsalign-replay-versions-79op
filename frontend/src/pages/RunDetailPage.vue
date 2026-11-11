@@ -4,7 +4,7 @@
       numeral="V"
       eyebrow="alignment run · 运行结果"
       :title="run?.job_name ?? '运行结果详情'"
-      :subtitle="run ? `窗口 ${formatDateTime(run.window_start)} → ${formatDateTime(run.window_end)} · 网格 ${run.grid_s}s · ${run.agg_strategy} / ${run.fill_strategy}` : ''"
+      :subtitle="run ? `v${run.version_no} · 窗口 ${formatDateTime(run.window_start)} → ${formatDateTime(run.window_end)} · 网格 ${run.grid_s}s · ${run.agg_strategy} / ${run.fill_strategy}` : ''"
     >
       <template #actions>
         <button class="btn btn-ochre" :disabled="!auth.canExport || !run || run.status !== 'completed'" :title="auth.canExport ? '' : 'viewer 角色无导出权限'" @click="exportCsv">
@@ -18,13 +18,48 @@
     <div v-if="store.loading && !run" class="loading mono">读取运行结果…</div>
 
     <template v-if="run">
+      <div v-if="versions.length" class="version-bar">
+        <span class="version-bar__label mono">版本</span>
+        <button
+          v-for="item in versions"
+          :key="item.id"
+          class="version-chip mono"
+          :class="{
+            'version-chip--active': item.id === run.id,
+            'version-chip--failed': item.status === 'failed',
+          }"
+          :title="`#${item.id} · ${item.status}`"
+          @click="goVersion(item.id)"
+        >
+          v{{ item.version_no }}<span v-if="item.is_current" class="version-chip__flag">在线</span>
+        </button>
+      </div>
+
+      <div v-if="run.status === 'completed' && !run.is_current" class="history-note">
+        <div class="history-note__tag mono">ARCHIVED VERSION</div>
+        <div>
+          <h2 class="history-note__title">v{{ run.version_no }} 历史版本快照</h2>
+          <p class="history-note__body">
+            数据冻结于发布时间（{{ run.published_at ? formatDateTime(run.published_at) : '—' }}），缺口与标注属于本版本；
+            后续到达的源数据不会回流到这里。
+            <a v-if="currentVersion" class="history-note__link" @click="goVersion(currentVersion.id)">
+              查看当前在线版本 v{{ currentVersion.version_no }} →
+            </a>
+          </p>
+        </div>
+      </div>
+
       <div v-if="run.status === 'failed'" class="failure">
         <div class="failure__tag mono">RUN FAILED</div>
         <div>
-          <h2 class="failure__title">任务失败：{{ run.failure_reason }}</h2>
+          <h2 class="failure__title">v{{ run.version_no }} 执行失败：{{ run.failure_reason }}</h2>
           <p class="failure__body">
             该窗口没有足够的原始点建立对齐网格（判定条件：窗口内点数 &lt; 网格桶数 10%）或时间戳乱序率超过 30%。
-            失败原因已落库，可回到任务配置换用更大的时间窗或核查网关回传。
+            失败原因已随版本留痕，可回到任务配置换用更大的时间窗或核查网关回传。
+            <template v-if="currentVersion">
+              该失败版本未发布，不影响在线结果。
+              <a class="failure__link" @click="goVersion(currentVersion.id)">查看当前在线版本 v{{ currentVersion.version_no }} →</a>
+            </template>
           </p>
         </div>
       </div>
@@ -125,6 +160,9 @@
               <div class="panel__title"><h2>运行信息</h2></div>
               <dl class="ledger">
                 <div><dt>运行号</dt><dd class="mono">#{{ run.id }}</dd></div>
+                <div><dt>版本</dt><dd class="mono">v{{ run.version_no }}{{ run.is_current ? ' · 当前在线' : ' · 未发布' }}</dd></div>
+                <div><dt>发布时间</dt><dd class="mono">{{ run.published_at ? formatDateTime(run.published_at) : '—' }}</dd></div>
+                <div><dt>冻结输入</dt><dd class="mono">{{ frozenPoints.toLocaleString() }} 点 / {{ run.input_watermark.length }} 测点</dd></div>
                 <div><dt>原始点</dt><dd class="mono">{{ run.point_count.toLocaleString() }}</dd></div>
                 <div><dt>耗时</dt><dd class="mono">{{ (run.duration_ms / 1000).toFixed(2) }}s</dd></div>
                 <div><dt>异常率</dt><dd class="mono">{{ run.anomaly_rate.toFixed(2) }}%</dd></div>
@@ -143,7 +181,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '../components/common/PageHeader.vue'
 import ErrorNotice from '../components/common/ErrorNotice.vue'
 import MetricStat from '../components/common/MetricStat.vue'
@@ -154,27 +192,48 @@ import WaveformChart from '../components/domain/WaveformChart.vue'
 import QualityScoreCard from '../components/domain/QualityScoreCard.vue'
 import { useRunStore } from '../stores/runStore'
 import { useAuthStore } from '../stores/authStore'
-import { exportRunCsv } from '../api/runs'
+import { exportRunCsv, fetchRuns } from '../api/runs'
 import { FILL_LABELS } from '../constants/labels'
 import { formatDateTime } from '../utils/format'
+import type { RunSummary } from '../types/run'
 
 function fillLabel(strategy: string): string {
   return (FILL_LABELS as Record<string, string>)[strategy] ?? strategy
 }
 
 const route = useRoute()
+const router = useRouter()
 const store = useRunStore()
 const auth = useAuthStore()
 const activeIndex = ref(0)
 const exportMessage = ref('')
+const versions = ref<RunSummary[]>([])
 
 const run = computed(() => store.detail)
+const currentVersion = computed(() => versions.value.find((item) => item.is_current) ?? null)
+const frozenPoints = computed(
+  () => run.value?.input_watermark?.reduce((sum, entry) => sum + (entry.point_count || 0), 0) ?? 0,
+)
 
 async function load() {
   const runId = Number(route.params.id)
   if (!Number.isNaN(runId)) {
     activeIndex.value = 0
     await store.loadDetail(runId)
+    if (run.value) {
+      try {
+        const { items } = await fetchRuns({ job_id: run.value.job_id })
+        versions.value = items.sort((a, b) => a.version_no - b.version_no)
+      } catch {
+        versions.value = []
+      }
+    }
+  }
+}
+
+function goVersion(runId: number) {
+  if (runId && runId !== run.value?.id) {
+    router.push(`/runs/${runId}`)
   }
 }
 
@@ -197,6 +256,77 @@ onMounted(load)
 .loading {
   color: var(--ink-faint);
   font-size: 11.5px;
+}
+.version-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.version-bar__label {
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.12em;
+  margin-right: 4px;
+}
+.version-chip {
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.version-chip--active {
+  border-color: var(--ink-green);
+  color: var(--ink-green);
+  background: oklch(0.975 0.02 150 / 0.5);
+}
+.version-chip--failed {
+  color: var(--alert);
+  border-style: dashed;
+}
+.version-chip__flag {
+  font-size: 9px;
+  color: var(--paper);
+  background: var(--ink-green);
+  padding: 1px 5px;
+  letter-spacing: 0.08em;
+}
+.history-note {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 18px;
+  border-left: 3px solid var(--ochre);
+  background: oklch(0.965 0.018 90 / 0.55);
+  padding: 16px 20px;
+  margin-bottom: 26px;
+}
+.history-note__tag {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: var(--ochre-deep);
+}
+.history-note__title {
+  font-size: 16px;
+}
+.history-note__body {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 6px 0 0;
+}
+.history-note__link,
+.failure__link {
+  color: var(--ochre-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  margin-left: 6px;
 }
 .stat-grid {
   margin-bottom: 28px;

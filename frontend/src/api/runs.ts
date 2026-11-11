@@ -2,8 +2,13 @@ import http from './http'
 import type { RunDetail, RunSummary } from '../types/run'
 import { downloadCsv } from '../utils/export'
 
-export async function fetchRuns(): Promise<{ items: RunSummary[] }> {
-  const { data } = await http.get<{ items: RunSummary[] }>('/alignment-runs')
+export interface RunFilters {
+  job_id?: number
+  current_only?: boolean
+}
+
+export async function fetchRuns(filters: RunFilters = {}): Promise<{ items: RunSummary[] }> {
+  const { data } = await http.get<{ items: RunSummary[] }>('/alignment-runs', { params: filters })
   return data
 }
 

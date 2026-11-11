@@ -20,6 +20,10 @@ class AlignmentJob(Base):
     fill_strategy: Mapped[str] = mapped_column(String(24), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     error_reason: Mapped[str] = mapped_column(String(40), default="")
+    # 当前在线结果 = 最近一次成功发布的版本；失败/运行中的版本不会移动该指针
+    current_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("alignment_run.id", use_alter=True), nullable=True
+    )
     params_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     note: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

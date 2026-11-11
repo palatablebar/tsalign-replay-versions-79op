@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from src.config.database import get_db
@@ -12,8 +12,13 @@ router = APIRouter(prefix="/alignment-runs", tags=["runs"])
 
 
 @router.get("", response_model=RunList)
-def list_runs(db: Session = Depends(get_db), _user: User = Depends(get_current_user)) -> dict:
-    return run_controller.list_runs(db)
+def list_runs(
+    job_id: int | None = Query(default=None),
+    current_only: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> dict:
+    return run_controller.list_runs(db, job_id=job_id, current_only=current_only)
 
 
 @router.get("/{run_id}")

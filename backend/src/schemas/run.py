@@ -42,9 +42,12 @@ class RunOut(BaseModel):
     id: int
     job_id: int
     job_name: str
+    version_no: int
+    is_current: bool
     status: str
     started_at: str | None
     finished_at: str | None
+    published_at: str | None
     duration_ms: int
     coverage_pct: float
     drift_ms: float
@@ -66,6 +69,7 @@ class RunDetail(RunOut):
     window_end: str
     agg_strategy: str
     fill_strategy: str
+    input_watermark: list[dict]
     drift: list[DriftItem]
     series: list[SeriesItem]
     gaps: list[GapOut]

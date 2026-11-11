@@ -10,8 +10,15 @@ def list_gaps(
     run_id: int | None = None,
     severity: str | None = None,
     device_code: str | None = None,
+    scope: str = "current",
 ) -> dict:
-    items = gap_service.list_gaps(db, run_id=run_id, severity=severity, device_code=device_code)
+    items = gap_service.list_gaps(
+        db,
+        run_id=run_id,
+        severity=severity,
+        device_code=device_code,
+        current_only=(scope != "all"),
+    )
     return {"items": items, "total": len(items)}
 
 

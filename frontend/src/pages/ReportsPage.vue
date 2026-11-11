@@ -21,10 +21,10 @@
     <ErrorNotice :error="store.error" />
     <div v-if="summary" class="report">
       <div class="stat-grid summary-stats">
-        <MetricStat label="完成运行" :value="summary.completed_runs" :digits="0" unit="次" :hint="`共 ${summary.run_count} 次提交`" />
-        <MetricStat label="平均质量分" :value="summary.average_quality" :digits="2" hint="completed runs" />
-        <MetricStat label="最高覆盖率" :value="summary.best_coverage" :digits="2" unit="%" hint="单次运行" />
-        <MetricStat label="缺口登记" :value="summary.total_gaps" :digits="0" unit="条" hint="全部运行合计" />
+        <MetricStat label="发布版本" :value="summary.completed_runs" :digits="0" unit="个" :hint="`共 ${summary.run_count} 次执行（含历史/失败版本）`" />
+        <MetricStat label="平均质量分" :value="summary.average_quality" :digits="2" hint="当前发布版本" />
+        <MetricStat label="最高覆盖率" :value="summary.best_coverage" :digits="2" unit="%" hint="当前发布版本" />
+        <MetricStat label="缺口登记" :value="summary.total_gaps" :digits="0" unit="条" hint="当前发布版本合计" />
       </div>
 
       <div class="split split--report">
@@ -32,7 +32,7 @@
           <div class="panel">
             <div class="panel__title">
               <h2>质量分趋势</h2>
-              <span class="mono panel-note">最近的完成运行</span>
+              <span class="mono panel-note">各任务当前发布版本</span>
             </div>
             <div class="trend">
               <div v-for="item in summary.quality_trend" :key="String(item.run_id)" class="trend__row">
@@ -53,7 +53,7 @@
           <div class="panel">
             <div class="panel__title">
               <h2>漂移估计台账</h2>
-              <span class="mono panel-note">最近 8 次完成运行</span>
+              <span class="mono panel-note">当前发布版本 · 最多 8 条</span>
             </div>
             <table class="table table--mono">
               <thead>
@@ -74,14 +74,14 @@
           </div>
 
           <div class="panel">
-            <div class="panel__title"><h2>最近运行</h2></div>
+            <div class="panel__title"><h2>当前发布版本</h2><span class="mono panel-note">历史版本见各运行详情</span></div>
             <table class="table table--mono">
               <thead>
                 <tr><th>运行</th><th>任务</th><th>覆盖率</th><th>漂移</th><th>缺口</th><th>质量</th><th>状态</th></tr>
               </thead>
               <tbody>
                 <tr v-for="row in summary.recent_runs" :key="String(row.id)">
-                  <td><RouterLink :to="`/runs/${row.id}`" class="link">#{{ row.id }}</RouterLink></td>
+                  <td><RouterLink :to="`/runs/${row.id}`" class="link">#{{ row.id }} v{{ row.version_no }}</RouterLink></td>
                   <td>{{ row.job_name }}</td>
                   <td>{{ Number(row.coverage_pct).toFixed(2) }}%</td>
                   <td>{{ Number(row.drift_ms) > 0 ? '+' : '' }}{{ Number(row.drift_ms).toFixed(0) }}ms</td>

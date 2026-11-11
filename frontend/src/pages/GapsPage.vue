@@ -21,7 +21,7 @@
       >
         {{ option.label }}<span class="mono filter__count">{{ countFor(option.value) }}</span>
       </button>
-      <span class="filter-hint mono">来源：全部运行 · 最近运行缺口时间轴</span>
+      <span class="filter-hint mono">来源：各任务当前发布版本 · 指定运行可查历史版本</span>
     </div>
 
     <div v-if="timelineSeries.length" class="panel">
@@ -53,7 +53,7 @@
         </thead>
         <tbody>
           <tr v-for="gap in store.items" :key="gap.id">
-            <td>{{ gap.run_name || `#${gap.run_id}` }}</td>
+            <td>{{ gap.run_name || `#${gap.run_id}` }}{{ gap.version_no ? ` v${gap.version_no}` : '' }}</td>
             <td>{{ gap.signal_code }}</td>
             <td>{{ formatDateTime(gap.start_ts) }}</td>
             <td>{{ formatDateTime(gap.end_ts) }}</td>
@@ -147,13 +147,13 @@ async function saveAnnotation(gapId: number) {
 
 async function loadTimeline() {
   try {
-    const runs = (await fetchRuns()).items
+    const runs = (await fetchRuns({ current_only: true })).items
     const latest = runs.find((run) => run.status === 'completed')
     if (!latest) return
     const detail = (await fetchRunDetail(latest.id)).run
     timelineSeries.value = detail.series
     timelineGaps.value = detail.gaps
-    timelineRunName.value = `${latest.job_name} · #${latest.id}`
+    timelineRunName.value = `${latest.job_name} · v${latest.version_no}`
   } catch {
     timelineSeries.value = []
   }

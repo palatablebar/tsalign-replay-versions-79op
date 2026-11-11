@@ -1,9 +1,14 @@
-"""Gap-event queries and analyst annotations."""
+"""Gap-event queries and analyst annotations.
+
+缺口事件（连同标注）只属于产生它的结果版本：重跑只新增版本的缺口行，
+历史版本的一行不删。列表默认只看各任务"当前发布版本"的缺口；
+传 run_id 可精确追溯某个历史版本。
+"""
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.constants.error_codes import AppError, ErrorCode
-from src.models import AlignmentRun, GapEvent
+from src.models import AlignmentJob, AlignmentRun, GapEvent
 from src.utils.timeutil import iso
 
 
@@ -13,6 +18,8 @@ def _to_dict(gap: GapEvent, run: AlignmentRun | None) -> dict:
         "id": gap.id,
         "run_id": gap.run_id,
         "run_name": run.job.name if run and run.job else "",
+        "version_no": run.version_no if run else None,
+        "run_status": run.status if run else "",
         "signal_code": signal.code if signal else "",
         "device_code": signal.device_code if signal else "",
         "device_name": signal.device_name if signal else "",
@@ -35,10 +42,17 @@ def list_gaps(
     run_id: int | None = None,
     severity: str | None = None,
     device_code: str | None = None,
+    current_only: bool = True,
 ) -> list[dict]:
     statement = select(GapEvent).order_by(GapEvent.start_ts, GapEvent.id)
     if run_id:
+        # 指定版本追溯：该版本的缺口（含标注）原样返回
         statement = statement.where(GapEvent.run_id == run_id)
+    elif current_only:
+        # 默认口径：只列各任务当前发布版本的缺口，历史版本不重复计数
+        statement = statement.join(AlignmentRun, GapEvent.run_id == AlignmentRun.id).join(
+            AlignmentJob, AlignmentJob.current_run_id == AlignmentRun.id
+        )
     if severity:
         statement = statement.where(GapEvent.severity == severity)
     gaps = list(db.scalars(statement))

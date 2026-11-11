@@ -5,6 +5,7 @@ export interface GapFilters {
   run_id?: number
   severity?: string
   device_code?: string
+  scope?: 'current' | 'all'
 }
 
 export async function fetchGaps(filters: GapFilters = {}): Promise<{ items: GapEvent[]; total: number }> {

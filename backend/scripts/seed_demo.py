@@ -12,11 +12,13 @@ import sys
 from datetime import datetime
 
 import numpy as np
+from sqlalchemy import func
 
 from src.config.database import SessionLocal, init_db
 from src.constants.enums import JobStatus, RunStatus
 from src.constants.messages import DEMO_PASSWORD
 from src.models import AlignmentJob, AlignmentRun, DataSource, GapEvent, RawTelemetry, Signal, User
+from src.services import versioning
 from src.services.demo_data import (
     BASE_DATETIME,
     BASE_EPOCH,
@@ -173,7 +175,9 @@ def _persist_raw(db, signals: list[Signal], series: dict[str, list[tuple[float, 
     return db.query(RawTelemetry).filter(RawTelemetry.signal_id.in_(ids)).count()
 
 
-def _persist_jobs_and_runs(db, signals: list[Signal], computed: list[dict]) -> tuple[list[AlignmentJob], list[AlignmentRun]]:
+def _persist_jobs_and_runs(
+    db, signals: list[Signal], computed: list[dict], series: dict[str, list[tuple[float, float, int]]]
+) -> tuple[list[AlignmentJob], list[AlignmentRun]]:
     signal_by_code = {signal.code: signal for signal in signals}
     user_by_email = {user.email: user for user in db.query(User).all()}
     jobs: list[AlignmentJob] = []
@@ -225,7 +229,6 @@ def _persist_jobs_and_runs(db, signals: list[Signal], computed: list[dict]) -> t
             continue
         aligned = item["aligned"]
         gap_result = item["gaps"]
-        run = db.query(AlignmentRun).filter(AlignmentRun.job_id == job.id).one_or_none()
         status = RunStatus.COMPLETED.value if gap_result and not gap_result.get("failure") else RunStatus.FAILED.value
         if aligned.get("failure"):
             status = RunStatus.FAILED.value
@@ -240,13 +243,39 @@ def _persist_jobs_and_runs(db, signals: list[Signal], computed: list[dict]) -> t
             "agg_strategy": job.agg_strategy,
             "fill_strategy": job.fill_strategy,
         }
+        # 版本身份与 worker 执行路径同一套算法：任务参数 + 窗口内输入指纹。
+        # 重复 seed 命中同一 request_key => 更新同一版本，不产生重复版本。
+        window_start_epoch = to_epoch(spec["window_start"])
+        window_end_epoch = to_epoch(spec["window_end"])
+        watermark = versioning.build_watermark(
+            [
+                (
+                    code,
+                    [
+                        (ts, value, seq)
+                        for ts, value, seq in series[code]
+                        if window_start_epoch <= ts <= window_end_epoch
+                    ],
+                )
+                for code in item["codes"]
+            ]
+        )
+        request_key = versioning.request_key(job, watermark)
+        run = db.query(AlignmentRun).filter(AlignmentRun.request_key == request_key).one_or_none()
         if run is None:
-            run = AlignmentRun(job_id=job.id)
+            version_no = int(
+                db.query(func.coalesce(func.max(AlignmentRun.version_no), 0))
+                .filter(AlignmentRun.job_id == job.id)
+                .scalar()
+                or 0
+            ) + 1
+            run = AlignmentRun(job_id=job.id, version_no=version_no, request_key=request_key)
             db.add(run)
         drifts = aligned.get("drift") or []
         max_drift = max(drifts, key=lambda value: abs(value["drift_ms"]), default={"drift_ms": 0.0})
         run.status = status
         run.finished_at = datetime(2026, 11, 10, 10, 31, 0)
+        run.published_at = run.finished_at if status == RunStatus.COMPLETED.value else None
         run.duration_ms = 1840 if status == RunStatus.COMPLETED.value else 220
         run.coverage_pct = round(float(aligned.get("coverage") or 0.0) * 100, 3)
         run.drift_ms = float(max_drift["drift_ms"])
@@ -258,9 +287,14 @@ def _persist_jobs_and_runs(db, signals: list[Signal], computed: list[dict]) -> t
         run.point_count = int(aligned.get("point_count") or 0)
         run.bucket_count = int(aligned.get("bucket_count") or 0)
         run.failure_reason = aligned.get("failure") or ""
+        run.input_watermark = watermark
         run.result_json = result_json
         db.commit()
         db.refresh(run)
+        if status == RunStatus.COMPLETED.value:
+            # 任务指向最近一次成功发布的版本；失败版本只留痕，不占用指针
+            job.current_run_id = run.id
+            db.commit()
         runs.append(run)
         if gap_result and not gap_result.get("failure"):
             _upsert_gaps(db, run, gap_result["gaps"], signal_by_code)
@@ -306,7 +340,7 @@ def run_seed() -> dict:
         series = build_seed_series()
         raw_points = _persist_raw(db, signals, series)
         computed = compute_seed_results(series)
-        jobs, runs = _persist_jobs_and_runs(db, signals, computed)
+        jobs, runs = _persist_jobs_and_runs(db, signals, computed, series)
         seeded_run_ids = [run.id for run in runs]
         gap_count = (
             db.query(GapEvent).filter(GapEvent.run_id.in_(seeded_run_ids)).count() if seeded_run_ids else 0

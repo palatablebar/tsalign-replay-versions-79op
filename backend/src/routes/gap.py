@@ -16,10 +16,11 @@ def list_gaps(
     run_id: int | None = Query(default=None),
     severity: str | None = Query(default=None),
     device_code: str | None = Query(default=None),
+    scope: str = Query(default="current"),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> dict:
-    return gap_controller.list_gaps(db, run_id=run_id, severity=severity, device_code=device_code)
+    return gap_controller.list_gaps(db, run_id=run_id, severity=severity, device_code=device_code, scope=scope)
 
 
 @router.patch("/{gap_id}/annotate")
